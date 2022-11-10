@@ -50,7 +50,10 @@
   :group 'dired-file-info
   :type '(choice (const :tag "Auto" nil)
                  (string :tag "Language"))
-  :set (lambda (_symbol value) (dired-file-info-set-message-language value)))
+  :set (lambda (symbol value)
+         (set-default symbol value)
+         (when (fboundp 'dired-file-info-update-message-language)
+           (dired-file-info-update-message-language))))
 
 (defcustom dired-file-info-timestamp-format "%Y-%m-%d %H:%M:%S"
   "Timestamp format."

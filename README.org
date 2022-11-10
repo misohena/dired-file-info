@@ -1,0 +1,47 @@
+#+TITLE: Dired Show File Information
+
+Alternative to dired-show-file-type(y) to display more detailed file information.
+
+* Usage
+
+#+begin_src elisp
+(autoload #'dired-file-info "dired-file-info" "" t)
+(with-eval-after-load "dired"
+  (define-key dired-mode-map "y" #'dired-file-info))
+#+end_src
+
+* Customize
+
+| Variable                                    | Default Value       |
+|---------------------------------------------+---------------------|
+| dired-file-info-message-language            | nil(Auto)           |
+| dired-file-info-timestamp-format            | "%Y-%m-%d %H:%M:%S" |
+| dired-file-info-details-local-file-command  | exiftool or stat    |
+| dired-file-info-details-remote-file-command | stat                |
+| dired-file-info-details-local-dir-command   | stat                |
+| dired-file-info-details-remote-dir-command  | stat                |
+| dired-file-info-overview-items              | -                   |
+
+* Example
+
+The following is the result of displaying directory information. The total file size and number of files are displayed.
+
+: emacs-28.2: directory
+: Size: 317.5MB (332967595bytes)
+: Files: 4365
+: Directories: 127
+: Accessed: 2022-11-10 22:26:19
+: Modified: 2022-09-23 12:43:15
+: Status Changed: 2022-09-23 12:43:05
+: (y:More details)
+
+The following is the result of displaying the information of a jpg image.
+
+: PXL_20221003_060116236.jpg: JPEG image data, Exif standard: [TIFF image data, little-endian, direntries=13, height=3024, manufacturer=Google, model=Pixel 3, orientation=upper-left, xresolution=185, yresolution=193, resolutionunit=2, software=HDR+ 1.0.440402506zd, datetime=2022:10:03 15:01:16, GPS-Data, width=4032], baseline, precision 8, 4032x3024, components 3
+: Size: 2.2MB (2328789bytes)
+: Accessed: 2022-11-10 22:29:32
+: Modified: 2022-10-03 15:01:20
+: Status Changed: 2022-10-19 10:03:34
+: (y:More details)
+
+Press y again to get more detailed information in [[https://exiftool.org/][exiftool]]. ExifTool can get information of a lot of files, not just images.

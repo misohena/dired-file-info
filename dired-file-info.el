@@ -136,45 +136,67 @@
 
 ;;;; Directory Scan
 
+(defun dired-file-info--accumulate-entry (path
+                                          fun-file
+                                          &optional
+                                          fun-enter
+                                          fun-leave
+                                          deref-symlinks
+                                          only-one-filesystem
+                                          depth)
+  (when (null depth) (setq depth 0))
+  (let* ((attr (file-attributes path))
+         (type (file-attribute-type attr))
+         (symlink (and (stringp type) type)))
+    (unless (and only-one-filesystem
+                 (/= only-one-filesystem
+                     (file-attribute-device-number attr)))
+      (cond
+       ;; Symbolic Link
+       (symlink
+        (if deref-symlinks
+            (dired-file-info--accumulate-entry
+             symlink fun-file fun-enter fun-leave
+             deref-symlinks only-one-filesystem depth)
+          (funcall fun-file path attr)))
+
+       ;; Directory
+       ((eq type t)
+        (dired-file-info--accumulate-directory
+         path fun-file fun-enter fun-leave
+         deref-symlinks only-one-filesystem (1+ depth)))
+
+       ;; Normal File
+       (t
+        (funcall fun-file path attr))))))
+
 (defun dired-file-info--accumulate-directory (dir-path
-                                              accumulator
+                                              fun-file
                                               &optional
                                               fun-enter
                                               fun-leave
-                                              dereference-links
+                                              deref-symlinks
                                               only-one-filesystem
                                               depth)
   (when (null depth) (setq depth 0))
   (when fun-enter (funcall fun-enter dir-path))
   (cl-loop
    for (entry-name . attr) in (directory-files-and-attributes dir-path)
-   for entry-path = (concat dir-path "/" entry-name)
-   for entry-type = (file-attribute-type attr)
-   for symlink = (and (stringp entry-type) entry-type)
-   unless (or (string-match "\\`\\.\\.?\\'" entry-name)
-              (and symlink (not dereference-links))
-              (and only-one-filesystem
-                   (/= only-one-filesystem
-                       (file-attribute-device-number attr))))
-   do (cond
-       ((eq entry-type t)
-        (dired-file-info--accumulate-directory
-         entry-path accumulator fun-enter fun-leave
-         dereference-links only-one-filesystem (1+ depth)))
-       (symlink
-        (funcall accumulator symlink attr))
-       (t
-        (funcall accumulator entry-path attr))))
+   unless (string-match "\\`\\.\\.?\\'" entry-name)
+   do (dired-file-info--accumulate-entry
+       (concat dir-path "/" entry-name)
+       fun-file fun-enter fun-leave
+       deref-symlinks only-one-filesystem depth))
   (when fun-leave (funcall fun-leave dir-path)))
 
 (defun dired-file-info--summarize-directory (dir-path
                                              &optional
-                                             dereference-links
+                                             deref-symlinks
                                              only-one-filesystem)
   (let ((size 0.0)
         (num-files 0)
         (num-dirs 0))
-    (dired-file-info--accumulate-directory
+    (dired-file-info--accumulate-entry ;;-directory? deref first symlink?
      dir-path
      (lambda (_path attr)
        (cl-incf num-files)
@@ -183,9 +205,25 @@
        (cl-incf num-dirs)
        (message (dired-file-info--msg "Scanning directory %s") path))
      nil
-     dereference-links
-     only-one-filesystem)
+     deref-symlinks
+     only-one-filesystem
+     0)
     (list size num-files num-dirs)))
+
+;;;; Dereference Symlinks
+
+(defun dired-file-info--deref-symlink (path deref-symlinks)
+  (when deref-symlinks
+    (let (target)
+      (while (setq target (file-symlink-p path))
+        (setq path target)))) ;;@todo infinite loop
+  path)
+
+(defun dired-file-info--directory-p (path deref-symlinks)
+  (and (file-directory-p path)
+       ;; Exclude symlink when not deref-symlinks
+       (or (not (file-symlink-p path))
+           deref-symlinks)))
 
 ;;;; Format Text
 
@@ -231,7 +269,7 @@
 ;;          (concat "\n" (dired-file-info--format-size du)))))
 
 (defun dired-file-info--directory-size (file &optional deref-symlinks)
-  (when (file-directory-p file)
+  (when (dired-file-info--directory-p file deref-symlinks)
     (let* ((summary (dired-file-info--summarize-directory
                      file deref-symlinks nil))
            (size (nth 0 summary))
@@ -241,13 +279,15 @@
               "\n" (dired-file-info--msg "Files") ": " (format "%d" num-files)
               "\n" (dired-file-info--msg "Directories") ": " (format "%d" num-dirs)))))
 
-(defun dired-file-info--file-size (file &optional _deref-symlinks)
-  (and (not (file-directory-p file))
+(defun dired-file-info--file-size (file &optional deref-symlinks)
+  (and (not (dired-file-info--directory-p file deref-symlinks))
        (concat "\n" (dired-file-info--format-size
-                     (file-attribute-size (file-attributes file))))))
+                     (file-attribute-size
+                      (file-attributes
+                       (dired-file-info--deref-symlink file deref-symlinks)))))))
 
-(defun dired-file-info--file-timestamps (file &optional _deref-symlinks)
-  (let ((attr (file-attributes file)))
+(defun dired-file-info--file-timestamps (file &optional deref-symlinks)
+  (let ((attr (file-attributes (dired-file-info--deref-symlink file deref-symlinks))))
     (concat
      (concat "\n" (dired-file-info--msg "Accessed") ": "
              (dired-file-info--format-time
@@ -270,12 +310,18 @@
                  (funcall fun file deref-symlinks))
                dired-file-info-overview-items
                "")
-    "\n" (substitute-command-keys "(\\[dired-file-info]:")
-    (dired-file-info--msg "More details") ")"
+    "\n"
+    "("
+    (if deref-symlinks "C-u ")
+    (substitute-command-keys "\\[dired-file-info]:")
+    (dired-file-info--msg "More details")
+    ")"
     )))
 
-(defun dired-file-info--show-details (file &optional _deref-symlinks)
+(defun dired-file-info--show-details (file &optional deref-symlinks)
   "Display detailed FILE information."
+  (setq file (dired-file-info--deref-symlink file deref-symlinks))
+
   (let ((command (if (file-remote-p (expand-file-name file))
                      (if (file-directory-p file)
                          dired-file-info-details-remote-dir-command
@@ -291,23 +337,29 @@
 
 ;;;; Command
 
-(defvar dired-file-info--last-file nil)
+(defvar dired-file-info--last-args nil)
 
 ;;;###autoload
-(defun dired-file-info (file &optional deref-symlinks)
+(defun dired-file-info (file &optional deref-symlinks details)
   "Display FILE information.
 
 Outputs detailed information when executed twice in a row."
-  (interactive (list (dired-get-filename t) current-prefix-arg))
-  (if (and (equal file dired-file-info--last-file)
-           (eq last-command 'dired-file-info))
+  (interactive
+   (let* ((file (dired-get-filename t))
+          (deref-symlinks current-prefix-arg)
+          (details (and (eq last-command 'dired-file-info)
+                        (equal (nth 0 dired-file-info--last-args) file)
+                        (equal (nth 1 dired-file-info--last-args) deref-symlinks))))
+     (list file deref-symlinks details)))
+
+  (if details
       ;; Details
       (progn
         (dired-file-info--show-details file deref-symlinks)
-        (setq dired-file-info--last-file nil))
+        (setq dired-file-info--last-args nil))
     ;; Overview
     (dired-file-info--show-overview file deref-symlinks)
-    (setq dired-file-info--last-file file)))
+    (setq dired-file-info--last-args (list file deref-symlinks details))))
 
 (provide 'dired-file-info)
 ;;; dired-file-info.el ends here

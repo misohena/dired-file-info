@@ -318,6 +318,8 @@
     ")"
     )))
 
+(defconst dired-file-info-buffer-name "*Dired File Info*")
+
 (defun dired-file-info--show-details (file &optional deref-symlinks)
   "Display detailed FILE information."
   (setq file (dired-file-info--deref-symlink file deref-symlinks))
@@ -331,7 +333,11 @@
                      dired-file-info-details-local-file-command))))
     (cond
      ((stringp command)
-      (dired-do-shell-command command nil (list file)))
+      (let ((shell-command-buffer-name dired-file-info-buffer-name))
+        (dired-do-shell-command command nil (list file))
+        (when-let ((buffer (get-buffer dired-file-info-buffer-name)))
+          (with-current-buffer buffer
+            (view-mode)))))
      ((functionp command)
       (funcall command file)))))
 

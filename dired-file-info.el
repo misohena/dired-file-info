@@ -203,7 +203,8 @@
        (cl-incf size (file-attribute-size attr)))
      (lambda (path)
        (cl-incf num-dirs)
-       (message (dired-file-info--msg "Scanning directory %s") path))
+       (let ((message-log-max nil))
+         (message (dired-file-info--msg "Scanning directory %s") path)))
      nil
      deref-symlinks
      only-one-filesystem

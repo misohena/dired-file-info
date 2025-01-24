@@ -134,6 +134,12 @@
            (gethash str dired-file-info--current-messages))
       str))
 
+;;;; Debug
+
+(defun dired-file-info--warn (format &rest args)
+  (display-warning 'dired-file-info
+                   (apply #'format-message format args)))
+
 ;;;; Directory Scan
 
 (defun dired-file-info--accumulate-entry (path
@@ -143,14 +149,21 @@
                                           fun-leave
                                           deref-symlinks
                                           only-one-filesystem
-                                          depth)
+                                          depth
+                                          attr)
   (when (null depth) (setq depth 0))
-  (let* ((attr (file-attributes path))
+  (let* ((attr (or attr (file-attributes path)))
          (type (file-attribute-type attr))
          (symlink (and (stringp type) type)))
-    (unless (and only-one-filesystem
-                 (/= only-one-filesystem
-                     (file-attribute-device-number attr)))
+    ;; Note: On MS-Windows, (file-attributes "Long filename...") seems
+    ;; to return nil.
+    (unless attr
+      (dired-file-info--warn "Ignore file `%s' (`file-attributes' returns nil)"
+                             path))
+    (when (and attr
+               (not (and only-one-filesystem
+                         (/= only-one-filesystem
+                             (file-attribute-device-number attr)))))
       (cond
        ;; Symbolic Link
        (symlink
@@ -170,6 +183,17 @@
        (t
         (funcall fun-file path attr))))))
 
+(defun dired-file-info--files-and-attributes (dir)
+  (condition-case err
+      ;; On MS-Windows, a long DIR-PATH will cause a file-missing
+      ;; ("No such file or directory") error.
+      (directory-files-and-attributes dir)
+    (error
+     (dired-file-info--warn
+      "Ignore dir `%s' (`directory-files-and-attributes' signals error `%s')"
+      dir err)
+     nil)))
+
 (defun dired-file-info--accumulate-directory (dir-path
                                               fun-file
                                               &optional
@@ -181,12 +205,19 @@
   (when (null depth) (setq depth 0))
   (when fun-enter (funcall fun-enter dir-path))
   (cl-loop
-   for (entry-name . attr) in (directory-files-and-attributes dir-path)
+   for (entry-name . attr) in (dired-file-info--files-and-attributes dir-path)
    unless (string-match "\\`\\.\\.?\\'" entry-name)
    do (dired-file-info--accumulate-entry
        (concat dir-path "/" entry-name)
        fun-file fun-enter fun-leave
-       deref-symlinks only-one-filesystem depth))
+       deref-symlinks only-one-filesystem depth
+       ;; By reusing already obtained attributes, not only performance
+       ;; is improved but also errors in `file-attributes' for long
+       ;; path names can be avoided.
+       ;; While (file-attributes "long file name..") returns nil, the
+       ;; attributes obtained from the `directory-files-and-attributes'
+       ;; function do not seem to be nil.
+       attr))
   (when fun-leave (funcall fun-leave dir-path)))
 
 (defun dired-file-info--summarize-directory (dir-path
